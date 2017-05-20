@@ -1,0 +1,153 @@
+/*
+BEAVRS Core using materials and geometries from Version 2.0 of the BEAVRS specification
+N. Horelik, B. Herman, B. Forget, and K. Smith. Benchmark for Evaluation and Validation of Reactor Simulations (BEAVRS), v1.0.1. Proc. Int. Conf. Mathematics and Computational Methods Applied to Nuc. Sci. & Eng., 2013. Sun Valley, Idaho
+
+A. Johnson - ajohnson400@gatech.edu
+
+Input file for final runs
+- No geometry plots
+- Unique fuel/burnable poison materials for the hottest  assembly in each axial layer
+- 3D geometry
+- No detectors
+*/
+
+include beavrs_mat.h
+include beavrs_pins.h
+include beavrs_assem.h
+include beavrs_vstack.h
+include beavrs_struct.h
+
+set acelib "/nv/hp22/ajohnson400/data/Codes/Serpent/xsdata/endfb7/sss_endfb7u.xsdata"
+set declib "/nv/hp22/ajohnson400/data/Codes/Serpent/xsdata/endfb7/sss_endfb7.dec"
+set nfylib "/nv/hp22/ajohnson400/data/Codes/Serpent/xsdata/endfb7/sss_endfb7.nfy"
+
+% Assemble the fuel assemblies
+
+lat 901 1 0.0 0.0 15 15 21.41728
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX 1100 1200 1300 1400 XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX 2100 2200 2300 2400 2500 2600 XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX 3100 3200 3300 3400 3500 3600 XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX 4100 4200 4300 4400 4500 XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX 5100 5200 5300 5400 XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX 6100 6200 6300 XXXX XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX 7100 7200 XXXX XXXX XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX 8100 XXXX XXXX XXXX XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX
+XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX
+
+surf 10 cyl 0.0 0.0 241.30 0.0 460.0
+
+cell 900 400 fill 901 -407
+cell 10 0 fill 400 -10
+cell 11 0 outside 10
+
+/*
+Use universe symmetry to create octant symmetry
+SERPENT 2 Universe Symmetry Wik page: http://serpent.vtt.fi/mediawiki/index.php/Universe_symmetries
+*/
+set usym 0 z 2 0.0 0.0 270 45.0
+% set pop 150000 300 70
+set bc 1
+set opti 1              % reduce memory consumption
+
+set inventory
+Sm-149
+Xe-135
+U-235
+Pu-239
+B-10
+
+set power 426.36E6  % 1/8 of HFP: 3411MW
+set printm 1
+set pop 150000 500 100
+
+% -- Detectors
+include beavrs_det_nodes.h
+include beavrs_det_assem.h
+
+% -- Depletion
+set pcc 0
+
+dep daystep
+0.5 0.5
+2.0 2.0
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+2.5 2.5
+
+% -- Restarts
+set rfw 1 smstep_pcc0.restart
+
+set rfr idx 13 smstep_pcc0.restart
