@@ -148,6 +148,5 @@ dep daystep
 2.5 2.5
 
 % -- Restarts
-set rfw 1 smstep_pcc0.restart
-
-set rfr idx 13 smstep_pcc0.restart
+set rfw 1 testInput.restart
+set rfr idx 11 testInput.restart

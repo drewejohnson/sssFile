@@ -9,7 +9,8 @@ Andrew Johnson
 """
 from os import path
 from re import match
-from subprocess import run, PIPE
+import subprocess
+from subprocess import PIPE
 
 
 class SerpentFile(object):
@@ -51,7 +52,7 @@ class InputFile(SerpentFile):
 
         self._version = version
         self._exeStr = exeStr
-        
+
         if findChildren:
             self._children = self.findChildren()
         else:
@@ -95,12 +96,12 @@ class InputFile(SerpentFile):
             if '>' in self._exeStr:
                 exeStr = self._exeStr.format(self.name, self.stdout.name)
             else:
-                exeStr = self._exeStr.format(self.name)    
-            return run(self._exeStr.split(), stdout=PIPE, stderr=PIPE)
+                exeStr = self._exeStr.format(self.name)
+            return subprocess.run(exeStr.split(), stdout=PIPE, stderr=PIPE)
         else:
             print('No execution string defined')
-            return None    
-            
+            return None
+
 
     @property
     def stdout(self):
@@ -123,14 +124,29 @@ class InputFile(SerpentFile):
         else:
             startStep = step
 
-        with open(self.name, 'a') as inputObj:
-            inputObj.write('\nset rfr idx {0} {1}\n'. \
-                format(startStep, self.restart.name))
+
+        with open(self.name, 'r') as inputObj:
+            _lines = inputObj.readlines()
+
+        restartWritten = False
+
+        with open(self.name, 'w') as inputObj:
+            for line in _lines:
+                if line[:7] == 'set rfr':
+                    self._writeRestartRead(startStep, inputObj)
+                    restartWritten = True
+                else:
+                    inputObj.write(line)
+            if not restartWritten:
+                self._writeRestartRead(startStep, inputObj)
+
+    def _writeRestartRead(self, step, fobj):
+        fobj.write('set rfr idx {0} {1}\n'.format(step, self.restart.name))
 
 
 class BumatFile(SerpentFile):
     def __init__(self, fileName, version):
-        super(BumatFile, self).__init__(fileName, 'ascii', version)    
+        super(BumatFile, self).__init__(fileName, 'ascii', version)
 
 
 class DepFile(SerpentFile):
@@ -199,7 +215,6 @@ class StdoutFile(SerpentFile):
         result = [0, None, None, None]
         result[:2] = self._getLastStep(releaseVersion=self.version[0])
         return tuple(result)
-
 
 
 class RestartFile(SerpentFile):
