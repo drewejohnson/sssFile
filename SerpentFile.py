@@ -5,6 +5,15 @@ Class for handling simple operations on SERPENT input files
 
 Andrew Johnson
 
+TODO - better repr and str methods for classes
+TODO - t.binaryDep
+TODO - t.matlabDep
+TODO - t.res
+TODO - t.dets
+TODO - scrape from detector -> return numpy array of the detector values
+TODO - scrape from matlabDep file -> return numpy matrix of isotopics over depletion
+TODO - plot detector values given some mapping function
+TODO - plot material burnup values given some mapping function
 
 """
 from os import path
@@ -46,22 +55,23 @@ class InputFile(SerpentFile):
     """
 
     def __init__(self, inputFile, stdoutFile=None, depFile=None, resFile=None,
-                 restartFile=None, findChildren=False, exeStr=None,
-                 bumatList=None, version=(2, 1, 28)):
+                 restartFile=None, detList=None, findChildren=False,
+                 exeStr=None, bumatList=None, version=(2, 1, 28), **kwargs):
         super(InputFile, self).__init__(inputFile, 'ascii', version)
 
         self._version = version
         self._exeStr = exeStr
 
         if findChildren:
-            self._children = self.findChildren()
+            self._children = self.findChildren(**kwargs)
         else:
             self._children = self._addChildrenFromDict({
                 'stdout': stdoutFile,
                 'dep': depFile,
                 'res': resFile,
                 'restart': restartFile,
-                'bumats': bumatList
+                'bumats': bumatList,
+                'dets': detList
             }, version=version)
 
 
@@ -75,20 +85,27 @@ class InputFile(SerpentFile):
         file classes
         """
         childs = dict()
-        classDict = {'stdout': StdoutFile, 'dep': DepFile, 'res': ResFile,
+        classDict = {'stdout': StdoutFile, 'dep': BinaryDepFile, 'res': ResFile,
                      'restart': RestartFile}
         for fileClass in classDict:
             if fileClass in fileDict:
                 childs[fileClass] = classDict[fileClass](fileDict[fileClass],
                                                          version=version)
         if 'bumats' in fileDict and isinstance(fileDict['bumats'],
-                                              (list, tuple)):
+                                              (list, tuple, set)):
             childs['bumats'] = []
             for bumat in fileDict['bumats']:
-                childs['bumats'].append(BumatFile(bumat, 'ascii', version))
+                childs['bumats'].append(BumatFile(bumat, version))
+
+        if 'dets' in fileDict and isinstance(fileDict['dets'],
+                                             (list, tuple, set)):
+            childs['dets'] = []
+            for det in fielDict['dets']:
+                childs['dets'].append(DetectorFile(det, version))
+
         return childs
 
-    def findChildren(self):
+    def findChildren(self, **kwargs):
         raise NotImplementedError
 
     def run(self):
@@ -114,6 +131,19 @@ class InputFile(SerpentFile):
         if 'restart' in self._children:
             return self._children['restart']
         return None
+
+    @property
+    def children(self):
+        return self._children
+
+    def addFile(self, fType:str, filePath: str):  # maybe make this a setter?
+        if fType in singleFileTypes:
+            self._children[fType] = \
+                singleFileTypes[fType](filePath, self.version)
+        elif fType in stepFileTypes:
+            if fType not in self._children or self._children[fType] is None:
+                self._children[fType] = []
+            self._children[fType].append(stepFileTypes[fType](filePath, self.version))
 
     def addRestartRead(self, step=None):
         if not self.restart.exists:
@@ -149,9 +179,14 @@ class BumatFile(SerpentFile):
         super(BumatFile, self).__init__(fileName, 'ascii', version)
 
 
-class DepFile(SerpentFile):
+class BinaryDepFile(SerpentFile):
     def __init__(self, fileName, version):
-        super(DepFile, self).__init__(fileName, 'ascii', version)
+        super(BinaryDepFile, self).__init__(fileName, 'ascii', version)
+
+
+class MatlabDepFile(SerpentFile):
+    def __init__(self, fileName, version):
+        super(MatlabDepFile, self).__init__(fileName, 'ascii', version)
 
 
 class ResFile(SerpentFile):
@@ -220,3 +255,15 @@ class StdoutFile(SerpentFile):
 class RestartFile(SerpentFile):
     def __init__(self, fileName, version):
         super(RestartFile, self).__init__(fileName, 'binary', version)
+
+
+class DetectorFile(SerpentFile):
+    def __init__(self, fileName, version):
+        super(DetectorFile, self).__init__(fileName, 'ascii', version)
+
+
+singleFileTypes = {'stdout': StdoutFile, 'binaryDep': BinaryDepFile,
+                       'restart': RestartFile, 'res': ResFile,
+                        'matlabDep': MatlabDepFile}
+
+stepFileTypes = {'det': DetectorFile, 'bumat': BumatFile}  #TODO add figures?
