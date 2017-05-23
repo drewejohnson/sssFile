@@ -5,21 +5,20 @@ Class for handling simple operations on SERPENT input files
 
 Andrew Johnson
 
-TODO - better repr and str methods for classes
-TODO - t.binaryDep
-TODO - t.matlabDep
-TODO - t.res
-TODO - t.dets
+TODO - better str methods
 TODO - scrape from detector -> return numpy array of the detector values
 TODO - scrape from matlabDep file -> return numpy matrix of isotopics over depletion
 TODO - plot detector values given some mapping function
 TODO - plot material burnup values given some mapping function
-
+TODO - docstrings
+TODO - __enter__ and __exit__ methods for SerpentFile to replace with open as {}:
 """
 from os import path
 from re import match
 import subprocess
 from subprocess import PIPE
+
+import numpy
 
 
 class SerpentFile(object):
@@ -47,7 +46,18 @@ class SerpentFile(object):
     def version(self):
         return self._version
 
-    #TODO repr, str methods either for class or for each instance
+    def _scrapeFileRegex(self, regexStr, escapeOnFirst=False):
+        with open(self.name, 'r') as fileStream:
+            line = fileStream.readline()
+            reMatch = None          
+            while line != '':
+                if match(regexStr, line) is not None:
+                    reMatch = match(regexStr, line)
+                    if escapeOnFirst:
+                        return reMatch
+                line = fileStream.readline()
+            return reMatch
+
 
 class InputFile(SerpentFile):
     """
@@ -88,7 +98,7 @@ class InputFile(SerpentFile):
         classDict = {'stdout': StdoutFile, 'dep': BinaryDepFile, 'res': ResFile,
                      'restart': RestartFile}
         for fileClass in classDict:
-            if fileClass in fileDict:
+            if fileClass in fileDict and fileDict[fileClass] is not None:
                 childs[fileClass] = classDict[fileClass](fileDict[fileClass],
                                                          version=version)
         if 'bumats' in fileDict and isinstance(fileDict['bumats'],
@@ -119,22 +129,48 @@ class InputFile(SerpentFile):
             print('No execution string defined')
             return None
 
+    def _lookUpFile(self, fileKey):
+        if fileKey in self._children:
+            return self._children[fileKey]
+        return None
 
     @property
     def stdout(self):
-        if 'stdout' in self._children:
-            return self._children['stdout']
-        return None
+        return self._lookUpFile('stdout')
 
     @property
     def restart(self):
-        if 'restart' in self._children:
-            return self._children['restart']
-        return None
+        return self._lookUpFile('restart')
+
+    @property
+    def det(self):
+        return self._lookUpFile('det')
+
+    @property
+    def bumat(self):
+        return self._lookUpFile('bumat')
+
+    @property
+    def binaryDep(self):
+        return self._lookUpFile('binaryDep')
+
+    @property
+    def matlabDep(self):
+        return self._lookUpFile('matlabDep')
+        
+    @property
+    def res(self):
+        return self._lookUpFile('res')
 
     @property
     def children(self):
         return self._children
+        
+    @property
+    def status(self):
+        if self.stdout is not None and self.stdout.exists:
+            return self.stdout.status
+        raise NotImplementedError('Need stdout file for status at this point')    
 
     def addFile(self, fType:str, filePath: str):  # maybe make this a setter?
         if fType in singleFileTypes:
@@ -153,7 +189,6 @@ class InputFile(SerpentFile):
             startStep = self.stdout.status[0] -1
         else:
             startStep = step
-
 
         with open(self.name, 'r') as inputObj:
             _lines = inputObj.readlines()
@@ -220,36 +255,17 @@ class StdoutFile(SerpentFile):
         """
 
         transportCalcRe = r'Transport calculation: step = (\d+) / (\d+)'
-        with open(self.name, 'r') as stdout:
-            line = stdout.readline()
-            lStep = [-1, -1]
-            while line != '':  #TODO or check for error?
-                if line[:12] == 'Transport ca':
-                    reMatch = match(transportCalcRe, line)
-                    # [line, step, totalStep]
-                    if reMatch is not None:
-                        if int(reMatch[1]) > lStep[0]:
-                            lStep[0] = int(reMatch[1])
-                        if int(reMatch[2]) > lStep[1]:
-                            lStep[1] = int(reMatch[2])
-                    else:
-                        raise RuntimeError('Bad regex'
-                                           '\nline: {0}\nregex: {1}'. \
-                                           format(line, transportCalcRe))
-                line = stdout.readline()
-        if lStep[0] > -1:
-            return tuple(lStep)
-        else:
-            raise RuntimeError('Got to end of file and no updated steps')
+        return self._scrapeFileRegex(transportCalcRe)
 
     @property
     def status(self):
         """Return a tuple with the latest status of the run
         (step, totalSteps, cycle, totalCycles)
         """
-        result = [0, None, None, None]
-        result[:2] = self._getLastStep(releaseVersion=self.version[0])
-        return tuple(result)
+        result = [-1, -1, -1, -1]
+        result[:2] = self._getLastStep(releaseVersion=self.version[0]).groups()
+            
+        return tuple([int(xx) for xx in result])
 
 
 class RestartFile(SerpentFile):
