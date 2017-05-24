@@ -6,12 +6,10 @@ Class for handling simple operations on SERPENT input files
 Andrew Johnson
 
 TODO - better str methods
-TODO - scrape from detector -> return numpy array of the detector values
 TODO - scrape from matlabDep file -> return numpy matrix of isotopics over depletion
 TODO - plot detector values given some mapping function
 TODO - plot material burnup values given some mapping function
 TODO - docstrings
-TODO - __enter__ and __exit__ methods for SerpentFile to replace with open as {}:
 """
 from os import path
 from re import match
@@ -49,7 +47,7 @@ class SerpentFile(object):
     def _scrapeFileRegex(self, regexStr, escapeOnFirst=False):
         with open(self.name, 'r') as fileStream:
             line = fileStream.readline()
-            reMatch = None          
+            reMatch = None
             while line != '':
                 if match(regexStr, line) is not None:
                     reMatch = match(regexStr, line)
@@ -57,6 +55,26 @@ class SerpentFile(object):
                         return reMatch
                 line = fileStream.readline()
             return reMatch
+
+    def _readUntilLineStart(self, fileStream, startKey, breakStr=''):
+        line = fileStream.readline()
+        if breakStr is None:
+            while line[:len(startKey)] != startKey:
+                line = fileStream.readline()
+        else:
+            while line[:len(startKey)] != startKey and line != breakStr:
+                line = fileStream.readline()
+        return line
+        
+    def _pickV1V2(self, _v1Func, _v2Func):
+        if self.version[0] == 2:
+            return _v2Func()
+        elif self.version[0] == 1:
+            return _v1Func()
+        else:
+            raise KeyError('Serpent {} does not exist'. \
+                format(self.version[0]))  
+   
 
 
 class InputFile(SerpentFile):
@@ -110,7 +128,7 @@ class InputFile(SerpentFile):
         if 'dets' in fileDict and isinstance(fileDict['dets'],
                                              (list, tuple, set)):
             childs['dets'] = []
-            for det in fielDict['dets']:
+            for det in fileDict['dets']:
                 childs['dets'].append(DetectorFile(det, version))
 
         return childs
@@ -143,8 +161,8 @@ class InputFile(SerpentFile):
         return self._lookUpFile('restart')
 
     @property
-    def det(self):
-        return self._lookUpFile('det')
+    def dets(self):
+        return self._lookUpFile('dets')
 
     @property
     def bumat(self):
@@ -157,7 +175,7 @@ class InputFile(SerpentFile):
     @property
     def matlabDep(self):
         return self._lookUpFile('matlabDep')
-        
+
     @property
     def res(self):
         return self._lookUpFile('res')
@@ -165,12 +183,12 @@ class InputFile(SerpentFile):
     @property
     def children(self):
         return self._children
-        
+
     @property
     def status(self):
         if self.stdout is not None and self.stdout.exists:
             return self.stdout.status
-        raise NotImplementedError('Need stdout file for status at this point')    
+        raise NotImplementedError('Need stdout file for status at this point')
 
     def addFile(self, fType:str, filePath: str):  # maybe make this a setter?
         if fType in singleFileTypes:
@@ -238,15 +256,12 @@ class StdoutFile(SerpentFile):
             raise FileNotFoundError('File {0} does not exist'. \
                 format(self.name))
 
-        if releaseVersion == 2:
-            return self._getLastStep_v2()
-        elif releaseVersion == 1:
-            raise NotImplementedError
-        else:
-            raise KeyError('SERPENT version {0} does not exist'. \
-                format(releaseVersion))
+        return self._pickV1V2(self._getLastStepV1, self._getLastStepV2)
+                
+    def _getLastStepV1(self):
+        raise NotImplementedError            
 
-    def _getLastStep_v2(self):
+    def _getLastStepV2(self):
         """Return a tuple containing the last completed burnup step
 
         Ex:
@@ -264,7 +279,7 @@ class StdoutFile(SerpentFile):
         """
         result = [-1, -1, -1, -1]
         result[:2] = self._getLastStep(releaseVersion=self.version[0]).groups()
-            
+
         return tuple([int(xx) for xx in result])
 
 
@@ -276,6 +291,68 @@ class RestartFile(SerpentFile):
 class DetectorFile(SerpentFile):
     def __init__(self, fileName, version):
         super(DetectorFile, self).__init__(fileName, 'ascii', version)
+        self._detectors = dict()
+        self._processDetectorFile()
+
+    def _processDetectorFile(self):
+        return self._pickV1V2(self._processDetectorFileV1, 
+                              self._processDetectorFileV2)
+
+    def _processDetectorFileV1(self):
+        raise NotImplementedError
+
+    def _processDetectorFileV2(self):
+        with open(self.name, 'r') as detObj:
+            line = detObj.readline()
+            while line != '':
+                line = self._readUntilLineStart(detObj, 'DET', breakStr='')
+
+                if line == '':
+                    break
+
+                detName = line[3:line.index(' ')]
+                line = detObj.readline()
+                data = []
+                while line[:2] != '];' and line != '':
+                    data.append([float(xx) for xx in line.split()])
+                    line = detObj.readline()
+
+                self._detectors[detName] = (Detector(detName,
+                                            numpy.array(data)))
+
+    def __getitem__(self, key):
+        return self._detectors[key]
+
+    def __setitem__(self, key, detClass):
+        if isinstance(detClass, Detector):
+            self._detectors[key] = detClass
+        else:
+            raise TypeError('Will not assign non-Detector Class objects'
+                            ' into {}'.format(self))
+
+    @property
+    def detectors(self):
+        return list(self._detectors.keys())
+        
+    def __iter__(self):
+        return iter(self._detectors.keys())
+
+    def process(self):
+        self._processDetectorFile()
+
+
+class Detector(object):
+    def __init__(self, detName, vals):
+        self._detName = detName
+        self._vals = vals
+        
+    @property
+    def values(self):
+        return self._vals[:,-2:] 
+            
+    @property
+    def allValues(self):
+        return self._vals
 
 
 singleFileTypes = {'stdout': StdoutFile, 'binaryDep': BinaryDepFile,
