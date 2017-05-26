@@ -10,40 +10,74 @@ TODO - scrape from matlabDep file -> return numpy matrix of isotopics over deple
 TODO - plot detector values given some mapping function
 TODO - plot material burnup values given some mapping function
 TODO - docstrings
+TODO - add read TOTAL properties from matlabDEP
 """
 from os import path
-from re import match
+from re import match, findall
 import subprocess
 from subprocess import PIPE
 
 import numpy
 
 
-SINGLE_FILE_TYPES = {'stdout': StdoutFile, 'binaryDep': BinaryDepFile,
-                       'restart': RestartFile, 'res': ResFile,
-                        'matlabDep': MatlabDepFile}
+MAT_VAR_REGEX = r'[\W]{,3}_([0-9a-zA-Z]*)_([\d\w]*) ' 
 
-STEP_FILE_TYPES = {'det': DetectorFile, 'bumat': BumatFile}  #TODO add figures?
-    
-def _getLinedEntry(streamRead, endString='];'):
+
+def _getLinedEntry(streamRead, endString='];', lineFunc=str.strip):
     line = streamRead()
     data = []
     while line[:len(endString)] != endString:
-        data.append(line.strip())
+        data.append(lineFunc(line))
         line = streamRead()
-    return data
+    return data, line
 
 
 def _readUntilLineStart(readStream, startKey, breakStr=''):
     line = readStream()
     while line[:len(startKey)] != startKey and line != breakStr:
         line = readStream()
+        if line == '':
+            raise IndexError('Reached end of file '
+                             'without finding string {}'.format(startKey))                        
     return line
 
 
 def _readBetween(readMethod, startString, endString='];'):
     _readUntilLineStart(readMethod, startString)
     return _getLinedEntry(readMethod, endString)
+
+
+def fltList(line):
+    return [float(xx) for xx in line.split()]
+    
+   
+def getMaterialVariableName(line):
+    return findall(MAT_VAR_REGEX, line)[0]
+    
+    
+def _v2GetMaterialDataBlock(readMethod, line, stopStr):
+    thisMaterialName = getMaterialVariableName(line)[0]
+    data = [line, ]
+    while line != '' and line[:len(stopStr)] != stopStr:
+        if len(line) < 2:
+            line = readMethod()
+            continue
+            
+        if line[:4] == 'MAT_' and getMaterialVariableName(line)[0] != thisMaterialName:
+            break   
+        
+        data.append(line.strip())
+        line = readMethod()    
+    
+    return line, data
+    
+def _v2GetMaterials(readMethod, line, parentClass, stopStr):
+    materials = []
+    while line[:len(stopStr)] != stopStr:
+        line = _readUntilLineStart(readMethod, 'MAT')
+        line, materialBlock = _v2GetMaterialDataBlock(readMethod, line, stopStr)
+        materials.append(Material(materialBlock, parentClass))
+    return materials
 
 
 class SerpentFile(object):
@@ -54,7 +88,7 @@ class SerpentFile(object):
     def __init__(self, fileName, textType, version):
         self._name = fileName
         self._textType = textType
-        self._version = version
+        self._version = version    
 
     @property
     def name(self):
@@ -83,7 +117,6 @@ class SerpentFile(object):
                 line = fileStream.readline()
             return reMatch
 
-
     def _pickV1V2(self, _v1Func, _v2Func):
         if self.version[0] == 2:
             return _v2Func()
@@ -91,13 +124,19 @@ class SerpentFile(object):
             return _v1Func()
         else:
             raise KeyError('Serpent {} does not exist'. \
-                format(self.version[0]))
+                           format(self.version[0]))
 
 
 class InputFile(SerpentFile):
     """
     Subclass for working directly with input files
     """
+    def _singleFileTypes(self):
+        return {'stdout': StdoutFile, 'binaryDep': BinaryDepFile,
+                'restart': RestartFile, 'res': ResFile, 'matlabDep': MatlabDepFile}
+
+    def _stepFileTypes(self):
+        return {'det': DetectorFile, 'bumat': BumatFile}
 
     def __init__(self, inputFile, stdoutFile=None, binaryDepFile=None,
                  resFile=None, restartFile=None, detList=None, exeStr=None,
@@ -118,7 +157,6 @@ class InputFile(SerpentFile):
             'dets': detList
         }, version=version)
 
-
     def _addChildrenFromDict(self, fileDict: dict, version):
         """Add files in fileDict to self._children
 
@@ -129,14 +167,13 @@ class InputFile(SerpentFile):
         file classes
         """
         childs = dict()
-        classDict = {'stdout': StdoutFile, 'binaryDep': BinaryDepFile, 'res': ResFile,
-                     'restart': RestartFile, 'matlabDep': MatlabDepFile}
-        for fileClass in classDict:
+        for fileClass in self._singleFileTypes():
             if fileClass in fileDict and fileDict[fileClass] is not None:
-                childs[fileClass] = classDict[fileClass](fileDict[fileClass],
-                                                         version=version)
+                childs[fileClass] = \
+                    self._singleFileTypes()[fileClass](fileDict[fileClass],
+                                                       version=version)
         if 'bumats' in fileDict and isinstance(fileDict['bumats'],
-                                              (list, tuple, set)):
+                                               (list, tuple, set)):
             childs['bumats'] = []
             for bumat in fileDict['bumats']:
                 childs['bumats'].append(BumatFile(bumat, version))
@@ -206,21 +243,21 @@ class InputFile(SerpentFile):
             return self.stdout.status
         raise NotImplementedError('Need stdout file for status at this point')
 
-    def addFile(self, fType:str, filePath: str):  # maybe make this a setter?
-        if fType in SINGLE_FILE_TYPES:
+    def addFile(self, fType: str, filePath: str):  # maybe make this a setter?
+        if fType in self._singleFileTypes():
             self._children[fType] = \
-                SINGLE_FILE_TYPES[fType](filePath, self.version)
-        elif fType in STEP_FILE_TYPES:
+                self._singleFileTypes()[fType](filePath, self.version)
+        elif fType in self._stepFileTypes():
             if fType not in self._children or self._children[fType] is None:
                 self._children[fType] = []
-            self._children[fType].append(STEP_FILE_TYPES[fType](filePath, self.version))
+            self._children[fType].append(self._stepFileTypes[fType](filePath, self.version))
 
     def addRestartRead(self, step=None):
         if not self.restart.exists:
             raise FileNotFoundError('Restart file does not exist')
 
         if step is None:
-            startStep = self.stdout.status[0] -1
+            startStep = self.stdout.status[0] - 1
         else:
             startStep = step
 
@@ -254,11 +291,14 @@ class BinaryDepFile(SerpentFile):
 
 
 class MatlabDepFile(SerpentFile):
+
     def __init__(self, fileName, version):
         super(MatlabDepFile, self).__init__(fileName, 'ascii', version)
         self.zai = None
         self.names = None
-        self.materials = dict()
+        self.materials = []
+        self.burnUp = None
+        self.days = None
 
     def process(self):
         self._pickV1V2(self._processMatlabDepV1, self._processMatlabDepV2)
@@ -268,17 +308,20 @@ class MatlabDepFile(SerpentFile):
 
     def _processMatlabDepV2(self):
         with open(self.name, 'r') as depObj:
-            self.zai = _readBetween(depObj.readline, 'ZAI')
-            names = _readBetween(depObj.readline, 'NAMES')
-            self.names = [name[1:-1].strip() for name in names]
-            line = _readUntilLineStart(depObj.readline, 'MAT')
-            
-            mat = Material(line[:line.index('=')], self)
-            self.materials[mat.name] = mat
-        return    
+            self.zai, line = _readBetween(depObj.readline, 'ZAI')
+            names, line = _readBetween(depObj.readline, 'NAMES')
+            self.names = [name[1:-1].strip() for name in names]            
+            self.materials = _v2GetMaterials(depObj.readline, line, self, stopStr='TOT')
+            # get burnup
+            line = _readUntilLineStart(depObj.readline, 'BU')
+            self.burnUp = fltList(line[line.index('[') + 1: line.index(']')])
+                
+            # get days    
+            line = _readUntilLineStart(depObj.readline, 'DAYS')
+            self.days = fltList(line[line.index('[') + 1: line.index(']')])        
         
     def __getitem__(self, key):
-        return self.materials[key]  
+        return self.materials[key]
 
 
 class ResFile(SerpentFile):
@@ -293,7 +336,7 @@ class StdoutFile(SerpentFile):
     def _getLastStep(self, releaseVersion=2):
         if not self.exists:
             raise FileNotFoundError('File {0} does not exist'. \
-                format(self.name))
+                                    format(self.name))
 
         return self._pickV1V2(self._getLastStepV1, self._getLastStepV2)
 
@@ -357,7 +400,7 @@ class DetectorFile(SerpentFile):
                     line = detObj.readline()
 
                 self._detectors[detName] = (Detector(detName,
-                                            numpy.array(data)))
+                                                     numpy.array(data)))
 
     def __getitem__(self, key):
         return self._detectors[key]
@@ -378,8 +421,8 @@ class DetectorFile(SerpentFile):
 
     def process(self):
         self._processDetectorFile()
-    
-    
+
+
 class Detector(object):
     def __init__(self, detName, vals):
         self._detName = detName
@@ -387,17 +430,64 @@ class Detector(object):
 
     @property
     def values(self):
-        return self._vals[:,-2:]
+        return self._vals[:, -2:]
 
     @property
     def allValues(self):
         return self._vals
-        
+
 
 class Material(object):
-    def __init__(self, nameDecl, parentClass):
-        self._fileName = parentClass.name
-        self.zai = parentClass.name
+    def __init__(self, data, parentClass):
+        self._parentClass = parentClass
+        self.zai = parentClass.zai
         self.names = parentClass.names
-        self.name = nameDecl.split('_')[1]
+        self._data = data
+        self.name = None
+        self._keys = []
+        self._process()
+
+    def __setitem__(self, varName, data):
+        self.__dict__[varName] = data
+        if varName not in self._keys:
+            self._keys.append(varName)
+
+    def __getitem__(self, varName):
+        if varName in self.__dict__:
+            return self.__dict__[varName]
+        return None
+
+    def keys(self):
+        return list(self._keys)
         
+    def getNuclideProperty(self, nuclideId, property='ADENS', searchIn='names'):
+        if searchIn not in ('zai', 'names'):
+            raise KeyError('Need either <zai> or <names> for getNuclideProperty'
+                           ' not {}'.format(searchIn))                   
+
+        if property not in self.keys():
+            raise KeyError('{} has no property {}'.format(self, property) + \
+                           '\ntry <' + ','.join(self.keys()) + '>')
+        nuclideIndex = self[searchIn].index(nuclideId)
+        return self[property][nuclideIndex]
+        
+    def _process(self):
+        self._parentClass._pickV1V2(self._processV1, self._processV2)  
+        # not the best implementation
+        del self._data
+
+    def _processV2(self):
+        for line in self._data:
+            if line[:3] == 'MAT':
+                thisVar = getMaterialVariableName(line)[1]
+                thisVarData = []
+            elif line[:2] == '];':
+                self._processDataBlock(thisVar, thisVarData)
+            else:
+                thisVarData.append(line[:line.index('%')]) 
+                
+    def _processDataBlock(self, variableName, variableData):
+        self[variableName] = numpy.array([fltList(line) for line in variableData])                       
+        
+    def _processV1(self):
+        raise NotImplementedError        
