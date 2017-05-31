@@ -481,6 +481,8 @@ class Material(object):
             if line[:3] == 'MAT':
                 thisVar = getMaterialVariableName(line)[1]
                 thisVarData = []
+                if self.name is None:
+                    self.name = getMaterialVariableName(line)[0]
             elif line[:2] == '];':
                 self._processDataBlock(thisVar, thisVarData)
             else:
