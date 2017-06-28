@@ -20,65 +20,7 @@ from subprocess import PIPE
 import numpy
 
 
-MAT_VAR_REGEX = r'[\W]{,3}_([0-9a-zA-Z]*)_([\d\w]*) ' 
-
-
-def _getLinedEntry(streamRead, endString='];', lineFunc=str.strip):
-    line = streamRead()
-    data = []
-    while line[:len(endString)] != endString:
-        data.append(lineFunc(line))
-        line = streamRead()
-    return data, line
-
-
-def _readUntilLineStart(readStream, startKey, breakStr=''):
-    line = readStream()
-    while line[:len(startKey)] != startKey and line != breakStr:
-        line = readStream()
-        if line == '':
-            raise IndexError('Reached end of file '
-                             'without finding string {}'.format(startKey))                        
-    return line
-
-
-def _readBetween(readMethod, startString, endString='];'):
-    _readUntilLineStart(readMethod, startString)
-    return _getLinedEntry(readMethod, endString)
-
-
-def fltList(line):
-    return [float(xx) for xx in line.split()]
-    
-   
-def getMaterialVariableName(line):
-    return findall(MAT_VAR_REGEX, line)[0]
-    
-    
-def _v2GetMaterialDataBlock(readMethod, line, stopStr):
-    thisMaterialName = getMaterialVariableName(line)[0]
-    data = [line, ]
-    while line != '' and line[:len(stopStr)] != stopStr:
-        if len(line) < 2:
-            line = readMethod()
-            continue
-            
-        if line[:4] == 'MAT_' and getMaterialVariableName(line)[0] != thisMaterialName:
-            break   
-        
-        data.append(line.strip())
-        line = readMethod()    
-    
-    return line, data
-    
-def _v2GetMaterials(readMethod, line, parentClass, stopStr):
-    materials = []
-    while line[:len(stopStr)] != stopStr:
-        line = _readUntilLineStart(readMethod, 'MAT')
-        line, materialBlock = _v2GetMaterialDataBlock(readMethod, line, stopStr)
-        materials.append(Material(materialBlock, parentClass))
-    return materials
-
+MAT_VAR_REGEX = r'[\W]{,3}_([0-9a-zA-Z]*)_([\d\w]*) '
 
 class SerpentFile(object):
     """
@@ -142,7 +84,7 @@ class InputFile(SerpentFile):
                  resFile=None, restartFile=None, detList=None, exeStr=None,
                  matlabDepFile=None, bumatList=None, version=(2, 1, 28),
                  **kwargs):
-        super(InputFile, self).__init__(inputFile, 'ascii', version)
+        SerpentFile.__init__(self, inputFile, 'ascii', version)
 
         self._version = version
         self._exeStr = exeStr
@@ -282,18 +224,18 @@ class InputFile(SerpentFile):
 
 class BumatFile(SerpentFile):
     def __init__(self, fileName, version):
-        super(BumatFile, self).__init__(fileName, 'ascii', version)
+        SerpentFile.__init__(self, fileName, 'ascii', version)
 
 
 class BinaryDepFile(SerpentFile):
     def __init__(self, fileName, version):
-        super(BinaryDepFile, self).__init__(fileName, 'ascii', version)
+        SerpentFile.__init__(self, fileName, 'ascii', version)
 
 
 class MatlabDepFile(SerpentFile):
 
     def __init__(self, fileName, version):
-        super(MatlabDepFile, self).__init__(fileName, 'ascii', version)
+        SerpentFile.__init__(self, fileName, 'ascii', version)
         self.zai = None
         self.names = None
         self.materials = []
@@ -318,7 +260,32 @@ class MatlabDepFile(SerpentFile):
                 
             # get days    
             line = _readUntilLineStart(depObj.readline, 'DAYS')
-            self.days = fltList(line[line.index('[') + 1: line.index(']')])        
+            self.days = fltList(line[line.index('[') + 1: line.index(']')])
+
+    def toDict(self, isoList, attrList, materialIDList):
+        """
+        Return a dictionary containing relevant data.
+
+        Parameters
+        ----------
+        isoList: iterable
+            List of isotopes to be considered
+        attrList: iterable
+            List of values to be returned, i.e. ADENS, MDENS
+        materialIDList: iterable
+            List of materials to include.
+            Note, these do not have to be exact matches.
+            Materials will be included if they contain a string of one of the
+            items in materialIDList.
+        """
+        vals = {'days': self.days, 'burnup': self.burnUp}
+        for material in self.materials:
+            for matID in materialIDList:
+                if matID in material.name:
+                    vals.update(
+                        {'_'.join([material.name, iso, value]): material[value][material.names.index(iso)]
+                         for iso in isoList for value in attrList})
+        return vals
         
     def __getitem__(self, key):
         return self.materials[key]
@@ -326,17 +293,16 @@ class MatlabDepFile(SerpentFile):
 
 class ResFile(SerpentFile):
     def __init__(self, fileName, version):
-        super(ResFile, self).__init__(fileName, 'ascii', version)
+        SerpentFile.__init__(self, fileName, 'ascii', version)
 
 
 class StdoutFile(SerpentFile):
     def __init__(self, fileName, version):
-        super(StdoutFile, self).__init__(fileName, 'ascii', version)
+        SerpentFile.__init__(self, fileName, 'ascii', version)
 
     def _getLastStep(self, releaseVersion=2):
         if not self.exists:
-            raise FileNotFoundError('File {0} does not exist'. \
-                                    format(self.name))
+            raise FileNotFoundError('File {0} does not exist'.format(self.name))
 
         return self._pickV1V2(self._getLastStepV1, self._getLastStepV2)
 
@@ -367,12 +333,12 @@ class StdoutFile(SerpentFile):
 
 class RestartFile(SerpentFile):
     def __init__(self, fileName, version):
-        super(RestartFile, self).__init__(fileName, 'binary', version)
+        SerpentFile.__init__(self, fileName, 'binary', version)
 
 
 class DetectorFile(SerpentFile):
     def __init__(self, fileName, version):
-        super(DetectorFile, self).__init__(fileName, 'ascii', version)
+        SerpentFile.__init__(self, fileName, 'ascii', version)
         self._detectors = dict()
         self._processDetectorFile()
 
@@ -399,8 +365,7 @@ class DetectorFile(SerpentFile):
                     data.append([float(xx) for xx in line.split()])
                     line = detObj.readline()
 
-                self._detectors[detName] = (Detector(detName,
-                                                     numpy.array(data)))
+                self._detectors[detName] = (Detector(detName, numpy.array(data)))
 
     def __getitem__(self, key):
         return self._detectors[key]
@@ -466,7 +431,7 @@ class Material(object):
                            ' not {}'.format(searchIn))                   
 
         if property not in self.keys():
-            raise KeyError('{} has no property {}'.format(self, property) + \
+            raise KeyError('{} has no property {}'.format(self, property) +
                            '\ntry <' + ','.join(self.keys()) + '>')
         nuclideIndex = self[searchIn].index(nuclideId)
         return self[property][nuclideIndex]
@@ -492,4 +457,62 @@ class Material(object):
         self[variableName] = numpy.array([fltList(line) for line in variableData])                       
         
     def _processV1(self):
-        raise NotImplementedError        
+        raise NotImplementedError
+
+
+def _getLinedEntry(streamRead, endString='];', lineFunc=str.strip):
+    line = streamRead()
+    data = []
+    while line[:len(endString)] != endString:
+        data.append(lineFunc(line))
+        line = streamRead()
+    return data, line
+
+
+def _readUntilLineStart(readStream, startKey, breakStr=''):
+    line = readStream()
+    while line[:len(startKey)] != startKey and line != breakStr:
+        line = readStream()
+        if line == '':
+            raise IndexError('Reached end of file '
+                             'without finding string {}'.format(startKey))
+    return line
+
+
+def _readBetween(readMethod, startString, endString='];'):
+    _readUntilLineStart(readMethod, startString)
+    return _getLinedEntry(readMethod, endString)
+
+
+def fltList(line):
+    return [float(xx) for xx in line.split()]
+
+
+def getMaterialVariableName(line):
+    return findall(MAT_VAR_REGEX, line)[0]
+
+
+def _v2GetMaterialDataBlock(readMethod, line, stopStr):
+    thisMaterialName = getMaterialVariableName(line)[0]
+    data = [line, ]
+    while line != '' and line[:len(stopStr)] != stopStr:
+        if len(line) < 2:
+            line = readMethod()
+            continue
+
+        if line[:4] == 'MAT_' and getMaterialVariableName(line)[0] != thisMaterialName:
+            break
+
+        data.append(line.strip())
+        line = readMethod()
+
+    return line, data
+
+
+def _v2GetMaterials(readMethod, line, parentClass, stopStr):
+    materials = []
+    while line[:len(stopStr)] != stopStr:
+        line = _readUntilLineStart(readMethod, 'MAT')
+        line, materialBlock = _v2GetMaterialDataBlock(readMethod, line, stopStr)
+        materials.append(Material(materialBlock, parentClass))
+    return materials
